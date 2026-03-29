@@ -5,6 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  Platform,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,12 +25,13 @@ import { useStatsStore } from '../src/stores/statsStore';
 import { PremiumModal } from '../src/components/PremiumModal';
 
 const { width } = Dimensions.get('window');
+const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function HomeScreen() {
   const router = useRouter();
   const pulseScale = useSharedValue(1);
   const { soundEnabled, toggleSound, loadSoundPreference } = useSoundStore();
-  const { isPremium, loadPremiumStatus } = usePremiumStore();
+  const { isPremium, loadPremiumStatus, setIsPremium } = usePremiumStore();
   const { totalFights, totalWins, loadStats } = useStatsStore();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
 
@@ -36,6 +39,35 @@ export default function HomeScreen() {
     loadSoundPreference();
     loadPremiumStatus();
     loadStats();
+    
+    // Check for Stripe payment success (web only)
+    if (Platform.OS === 'web') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const premiumStatus = urlParams.get('premium');
+      
+      if (premiumStatus === 'success') {
+        // Verify payment with backend
+        const sessionId = localStorage.getItem('stripe_session_id');
+        if (sessionId) {
+          fetch(`${EXPO_PUBLIC_BACKEND_URL}/api/verify-payment/${sessionId}`)
+            .then(res => res.json())
+            .then(data => {
+              if (data.paid) {
+                setIsPremium(true);
+                localStorage.removeItem('stripe_session_id');
+                Alert.alert('Welcome to Premium!', 'Thank you! All ads have been removed.');
+              }
+            })
+            .catch(console.error);
+        }
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (premiumStatus === 'cancelled') {
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+    
     pulseScale.value = withRepeat(
       withSequence(
         withTiming(1.05, { duration: 1000 }),

@@ -7,10 +7,14 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  Platform,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, SlideInUp } from 'react-native-reanimated';
 import { usePremiumStore, PREMIUM_PRICE_DISPLAY } from '../stores/premiumStore';
+
+const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface PremiumModalProps {
   visible: boolean;
@@ -23,20 +27,48 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
 }) => {
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
-  const { purchasePremium, restorePurchase } = usePremiumStore();
+  const { purchasePremium, restorePurchase, setIsPremium } = usePremiumStore();
 
   const handlePurchase = async () => {
     setIsPurchasing(true);
     try {
-      const success = await purchasePremium();
-      if (success) {
-        Alert.alert(
-          'Welcome to Premium!',
-          'Thank you! All ads have been removed.',
-          [{ text: 'Awesome!', onPress: onClose }]
-        );
+      // On web, use Stripe Checkout
+      if (Platform.OS === 'web') {
+        const currentUrl = window.location.href;
+        const baseUrl = window.location.origin;
+        
+        const response = await fetch(`${EXPO_PUBLIC_BACKEND_URL}/api/create-checkout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            success_url: `${baseUrl}/?premium=success`,
+            cancel_url: `${baseUrl}/?premium=cancelled`,
+          }),
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          // Store session ID for verification
+          localStorage.setItem('stripe_session_id', data.session_id);
+          // Redirect to Stripe Checkout
+          window.location.href = data.checkout_url;
+        } else {
+          Alert.alert('Error', 'Could not start checkout. Please try again.');
+        }
       } else {
-        Alert.alert('Purchase Failed', 'Please try again later.');
+        // On mobile, use mock purchase (or real IAP when available)
+        const success = await purchasePremium();
+        if (success) {
+          Alert.alert(
+            'Welcome to Premium!',
+            'Thank you! All ads have been removed.',
+            [{ text: 'Awesome!', onPress: onClose }]
+          );
+        } else {
+          Alert.alert('Purchase Failed', 'Please try again later.');
+        }
       }
     } catch (e) {
       Alert.alert('Error', 'Something went wrong. Please try again.');
